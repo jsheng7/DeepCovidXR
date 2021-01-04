@@ -11,6 +11,21 @@ from keras.preprocessing.image import ImageDataGenerator
 import os
 
 def load_CXR_from_list(filelist, im_shape):
+    """
+    This function reads in images of jpg or png or jpeg format from a directory, 
+    nomalize the images and store them in an array.
+    The images should have same length size and width size.
+    
+    Parameters:
+        filelist (list): A list contains all file names in a directory.
+        im_shape (int): the size of images in the resulting array(img_shape, img_shape).
+        
+    Returns:
+        X (list): a list of resized and normalized images.
+        resized_raw (list): a list of resized images.  
+        raw_images (list): 
+
+    """
     X = np.zeros((len(filelist), im_shape[0], im_shape[1], 1))
     resized_raw = np.zeros((len(filelist), im_shape[0], im_shape[1]))
     raw_images = []
@@ -41,8 +56,17 @@ def load_CXR_from_list(filelist, im_shape):
     return X, resized_raw, raw_images
 
 def masked(img, mask, alpha=1):
-    """Returns image with GT lung field outlined with red, predicted lung field
-    filled with blue."""
+    """
+    This function outlines lung field with red and predicted lung field with blue.
+    
+    Parameters:
+        img (array): the original x-ray image.
+        mask (array): a predicted mask for the lung field.
+        alpha (float): variable used to change the color of the predicted lung field.
+        
+    Returns:
+        img_masked (array): the lung field and predicted lung field mask. 
+    """
     rows, cols = img.shape
     color_mask = np.zeros((rows, cols, 3))
     color_mask[..., 2] = mask / 255
@@ -58,6 +82,17 @@ def masked(img, mask, alpha=1):
     return img_masked
 
 def draw_spine(img, spine_pos):
+    """
+    This function highlights the spine position on the original image.
+    
+    Parameters:
+        img (array): the original x-ray image.
+        spine_pos (array): 
+        
+    Returns:
+        img_color (array): superimpose the spine_pos and the original image.
+
+    """
     if len(img.shape) == 2:
         img_color = np.dstack((img, img, img))
     elif len(img.shape) == 3 and img.shape[2] == 1:
@@ -73,12 +108,20 @@ def draw_spine(img, spine_pos):
     return img_color
 
 def draw_bbox(img, bbox):
-    '''
-    input img, and bounding box
-    return a color RGB image (img.shape, 3) with bounding box drawn
-    original img is not changed.
-    '''
 
+    """
+    This function draws bounding box of lung field.
+    
+    Parameters:
+        img (array): the original x-ray image.
+        bbox (array): the bounding box of lung field in the form of left most coordinate,
+        top most coordinate, right most coordinate and bottom most coordinate.
+        
+    Returns:
+        img_color (array): the superimposed image of the original image and the
+        bounding box.
+
+    """
 
     if len(img.shape) == 2:
         img_color = np.dstack((img, img, img))
@@ -97,21 +140,64 @@ def draw_bbox(img, bbox):
 
 
 def join_path_from_list(cur_path, path_list):
+    
+    """
+    This function adds a series of directory to a given path.
+    
+    Parameters:
+        cur_path (path object): the path to be extended.
+        path_list (list): a list of directory to add to cur_path.
+        
+    Returns:
+        cur_path (path object): the extended path.
+
+    """
     for folder in path_list:
         cur_path = cur_path.joinpath(folder)
     return cur_path
 
 def change_first_folder(data_path, attached_str):
+    """
+    This function changes the first directory specified in a given path.
+    
+    Parameters:
+        data_path (path object): the path to be alternated.
+        attached_str (string): the replacement of the first directory in data_path.
+        
+    Returns:
+        to_return (path object): the altered path.
+
+    """
     to_return = data_path.copy()
     to_return[0] = to_return[0] + attached_str
     return to_return
 
 def select_spine(img):
+    """
+    This function finds the location of spine of an x-ray image.
+    
+    Parameters:
+        img (array): the original x-ray image.
+        
+    Returns:
+        max_r2 (int): 
+
+    """
     sumpix0 = np.sum(img, axis = 0)
     max_r2 = np.int_(len(sumpix0) / 3) + np.argmax(sumpix0[ np.int_(len(sumpix0) / 3): np.int_(len(sumpix0)* 2 / 3)])
     return max_r2
 
 def mirror(spine_pos, pos):
+    """
+    This function .
+    
+    Parameters:
+        img (array): the original x-ray image.
+        
+    Returns:
+        max_r2 (int): 
+
+    """
     if pos < spine_pos:
         return spine_pos + (spine_pos - pos)
     else:
@@ -128,6 +214,7 @@ def left_right(label_map, label, spine_pos):
         return 'mid'
 
 def select_lung(pred, resized_raw, cut_thresh, debug, filename,out_pad_size, k_size = 5):
+    
     opened = cv2.morphologyEx(pred, cv2.MORPH_OPEN, kernel = np.ones((k_size, k_size)))
 
     cnt, label_map, stats, centriods = cv2.connectedComponentsWithStats(opened)
