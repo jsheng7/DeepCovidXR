@@ -10,6 +10,12 @@ from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator
 import os
 
+"""
+This script will preprocess a given image dataset. For each chest x-ray image, 
+the chest region will be detected and segmented with pretrained U-Net. The lung
+region will be 256x256 in size. The result will be saved in a new directory.
+"""
+
 def load_CXR_from_list(filelist, im_shape):
     """
     This function reads in images of jpg or png or jpeg format from a directory, 
@@ -180,7 +186,7 @@ def select_spine(img):
         img (array): the original x-ray image.
         
     Returns:
-        max_r2 (int): 
+        max_r2 (int): location of the spine.
 
     """
     sumpix0 = np.sum(img, axis = 0)
@@ -192,10 +198,12 @@ def mirror(spine_pos, pos):
     This function .
     
     Parameters:
-        img (array): the original x-ray image.
+        spine_pos (int): the position of the spine.
+        pos (int): the position of the middle of the image.
         
     Returns:
-        max_r2 (int): 
+        spine_pos + (spine_pos - pos) or spine_pos - (pos - spine_pos) (int): mirror
+        the spine position to left or right of the center of the image.
 
     """
     if pos < spine_pos:
@@ -204,6 +212,19 @@ def mirror(spine_pos, pos):
         return spine_pos - (pos - spine_pos)
 
 def left_right(label_map, label, spine_pos):
+    """
+    This function .
+    
+    Parameters:
+        label_map (array): the label matrix produced from cv2.connectedComponentsWithStats.
+        label (int): the label value to be compared with.
+        spine_pos (int): the location of the spine.
+        
+    Returns:
+        'left'\'right'\'mid': the labeled segment with a larger area.
+
+    """
+    
     left_chunk_size = np.sum(label_map[:, 0 : spine_pos] == label)
     right_chunk_size = np.sum(label_map[:, spine_pos + 1 :] == label)
     if left_chunk_size > right_chunk_size:
@@ -214,6 +235,27 @@ def left_right(label_map, label, spine_pos):
         return 'mid'
 
 def select_lung(pred, resized_raw, cut_thresh, debug, filename,out_pad_size, k_size = 5):
+    """
+    This function detects the lung region and denoise the image.
+    
+    Parameters:
+        pred (array): the predicted lung mask produced by the pretrained U-Net.
+        resied_raw (array): the original image resize.
+        cut_thresh (float): the area threshold to keep a segment as a part of the
+        lung region.
+        debug (boolean): print extra information about the connected components
+        for debugging purpose.
+        filename (string): the file name of the original image.
+        out_pad_size (int): the number of pixels padded ourside of the bounding
+        box.
+        k_size (int): the size of the opencv morphological kernel.
+        
+    Returns:
+        denoised (array): a binary mask generated from the connected areas.
+        bbox (array): the coordinates of the lung region bounding box.
+        spine_pos (int): the position of the spine.
+
+    """
     
     opened = cv2.morphologyEx(pred, cv2.MORPH_OPEN, kernel = np.ones((k_size, k_size)))
 
@@ -228,7 +270,6 @@ def select_lung(pred, resized_raw, cut_thresh, debug, filename,out_pad_size, k_s
         print(stats)
     stats = stats[stats[:, cv2.CC_STAT_AREA] > cut_thresh * np.prod(pred.shape)]
 
-    # only save the largest two or
     denoised = np.zeros(opened.shape, dtype = np.uint8)
     for i in range(1, min(stats.shape[0], 3)):
         denoised[label_map == idx_sorted[i]] = 255
@@ -284,6 +325,24 @@ def select_lung(pred, resized_raw, cut_thresh, debug, filename,out_pad_size, k_s
     return denoised, bbox, spine_pos
 
 def out_pad(bbox_in, shape, out_pad_size):
+    
+    """
+    This function adds padding outside of the bounding box.
+    
+    Parameters:
+        bbox_in (array): the array that contains the coordinates of the bounding
+        box for the lung region.
+        shape (array): the length of the bounding box. The boudning box needs to 
+        be square shaped.
+        out_pad_size (int): the number of pixels to be padded outside of the bounding
+        box.
+        
+    Returns:
+        bbox_padded (array): the array that contains the coordinates of the padded
+        bounding box.
+
+    """
+    
     left, top, right, bottom = bbox_in
 
     left = max(0, left - out_pad_size)
@@ -297,6 +356,23 @@ def out_pad(bbox_in, shape, out_pad_size):
     return bbox_padded
 
 def square_helper(start, finish, expand1, expand2, size_limit):
+    
+    """
+    This function can expand one axis of the size of the bounding box.
+    
+    Parameters:
+        start (int): the coordinate of the start point. 
+        finish (int): the coordinate of the finish point.
+        expand1 (int): the number of pixels used to expand the starting point.
+        expand2 (int): the number of pixels used to expand the finishing point.
+        size_limit (int): the maximum length of this expansion.
+        
+    Returns:
+        new_start (int): the coordinate of the expanded start point.
+        new_finish (int): the coordinate of the expanded finish point.
+
+    """
+    
     new_start = max(0, start - expand1)
     expand1_rem = expand1 - (start - new_start)
     new_finish = min(size_limit , finish + expand2)
@@ -311,6 +387,20 @@ def square_helper(start, finish, expand1, expand2, size_limit):
     return new_start, new_finish
 
 def square_bbox(img_shape, raw_bbox):
+    
+    """
+    This function change the shape of a bounding box to square.
+    
+    Parameters:
+        img_shape (array): the shape of the original image.
+        raw_bbox (array): the bounding box to be shaped into square.
+        
+    Returns:
+        squared_bbox (array): the square bounding box generated from the raw bounding
+        box.
+
+    """
+    
     if raw_bbox is None:
         return None
     # img_shape = denoised_no_bbox.shape
@@ -337,9 +427,22 @@ def square_bbox(img_shape, raw_bbox):
     return sqaured_bbox
 
 def bbox_mask_and_crop(raw_img, bbox):
-    '''
-    return the cropped image, bounding box mask, and the bounding box itself.
-    '''
+    """
+    This function crops the original image using the bounding box.
+    
+    Parameters:
+        raw_img (array): the original uncropped image.
+        bbox (array): the bounding box array which contains the coordinates 
+        of the four corners of the box. The bounding box can be shapes other than
+        square.
+        
+    Returns:
+        cropped_img (array): the image cropped out from the original image using 
+        the bounding box.
+        bbox (array): the square bounding box array which contains the coordinates 
+        of the four corners of the box. 
+
+    """
     if bbox is None:
         return raw_img, bbox
 
@@ -353,6 +456,20 @@ def bbox_mask_and_crop(raw_img, bbox):
     return cropped_img, bbox
 
 def square_crop(raw_img, raw_bbox):
+    """
+    This function crops the original image using a square bounding box generated
+    from the provided raw bounding box.
+    
+    Parameters:
+        raw_img (array): the original uncropped image.
+        raw_bbox (array): the bounding box which might not be square shaped.
+        
+    Returns:
+        bbox_mask_and_crop(raw_img, sqaured_bbox): see the bbox_mask_and_crop function for
+        more information.
+
+    """
+    
     if raw_bbox is None:
         return raw_img, raw_bbox
     sqaured_bbox = square_bbox(raw_img.shape, raw_bbox)
@@ -360,6 +477,23 @@ def square_crop(raw_img, raw_bbox):
     return bbox_mask_and_crop(raw_img, sqaured_bbox)
 
 def crop_lung(raw_img, cur_shape, bbox):
+    
+    """
+    This function crops out the lung region from the original image using a bounding 
+    box which might not be square shaped.
+    
+    Parameters:
+        raw_img (array): the original uncropped image.
+        cur_shape (array): the desired shape of the image.
+        bbox (array): the bounding box to the lung region which might not be square 
+        shaped
+        
+    Returns:
+        bbox_mask_and_crop(raw_img, raw_bbox): see the bbox_mask_and_crop function for
+        more information.
+
+    """
+    
     if bbox is None:
         return raw_img, None
     if len(bbox) != 4:
@@ -533,6 +667,36 @@ def single_img_crop(img, resized_raw_img, raw_img, file_path, UNet, result_folde
 def lungseg_fromdata(X, resized_raw, raw_images, file_paths, UNet, result_folder, 
                         im_shape = (256, 256), cut_thresh = 0.02, out_pad_size = 8, debug_folder = None ,debugging = False):
 
+    '''
+    Crop out the lung area from CXR for a set of images.
+    lung prediction based on UNet
+    Parameters
+    ----------
+    img : np array 
+        acceptable shape: (n, x, x, 1), (n, x, x), (x, x, 1), (x, x)
+        where n is the number of images; x is the input_shape, by default 256
+    resized_raw_img : np array
+        raw sized image, with shape of (x, x);
+        see load_CXR_from_list for details
+    raw_img : np array
+        original raw image;
+        see load_CXR_from_list for details
+    UNet: loaded UNet model from https://github.com/imlab-uiip/lung-segmentation-2d
+        path to UNet    
+    result_folder : preferrebly pathlib object
+        path to output
+    im_shape : tuple
+        specify the input image shape of UNet, by default (256, 256)
+    cut_thresh: float
+        connected components less than cut_thresh * np.prod(im_shape) will be removed
+    out_pad_size: int
+        Default to be 8, how many pixels to enlarge the bounding box. 
+    debug_folder : preferrebly pathlib object
+        path to debug images; if not specified, no debug images will be written to local
+    debugging: bool
+        Default to be false. If true, will plot debugging images to screen instead of saving to local.
+    '''
+    
     # tf.debugging.set_log_device_placement(True)
     # print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
 
@@ -692,6 +856,11 @@ def genlist(data_path_list, list_dict):
                 return cur_dict
 
 if __name__ == '__main__':
+    
+    """
+    This is the main function of the script. A set of chest x-rays can be cropped 
+    here.
+    """
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', '--folder', type=str, help = 'the directory of the image folder')
